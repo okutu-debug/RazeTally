@@ -1,0 +1,25 @@
+# razetally dependencies
+ 
+# OCR engine Python wrapper
+pytesseract>=0.3.10
+ 
+# Image processing
+Pillow>=10.0.0
+ 
+# PDF text extraction (for non-scanned PDFs)
+pdfplumber>=0.10.0
+pypdf>=4.0.0
+ 
+# System dependencies (install separately):
+# sudo apt-get install -y tesseract-ocr poppler-utils
+# For additional languages: sudo apt-get install tesseract-ocr-<lang>
+# e.g.: tesseract-ocr-fra  (French)
+#       tesseract-ocr-deu  (German)
+#       tesseract-ocr-ara  (Arabic)
+ 
+# Visualization / web UI
+streamlit>=1.25.0
+pandas>=2.0.0
+plotly>=5.0.0
+mysql-connector-python>=8.0.0
+ 

@@ -1,0 +1,5 @@
+[server]
+baseUrlPath = ""
+
+[theme]
+primaryColor = "#1e4a85"

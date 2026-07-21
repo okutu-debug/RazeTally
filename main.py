@@ -19,7 +19,6 @@ def collect_pdfs(path: Path) -> list[Path]:
         return sorted(path.glob("*.pdf"), key=lambda p: p.name.lower())
     return [path]
 
-
 def process_one(pdf_path: Path, args) -> bool:
     """Process a single PDF. Returns True on success."""
     source_key = str(pdf_path.resolve())
@@ -82,29 +81,17 @@ def process_one(pdf_path: Path, args) -> bool:
     print(f"  [OK] {station} | valid votes: {total}")
     return True
 
-
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="razetally -- Claude Vision parser for IEBC election result forms"
-    )
-    parser.add_argument(
-        "path", nargs="?", default="docs/forms",
-        help="PDF file or directory of PDFs (default: docs/forms/)",
-    )
-    parser.add_argument("--dpi",   type=int, default=300,
-                        help="Rasterization DPI (default: 300).")
-    parser.add_argument("--output", "-o",
-                        help="Save JSON here (file for single, directory for batch).")
-    parser.add_argument("--api-key", default=os.environ.get("ANTHROPIC_API_KEY"),
-                        help="Anthropic API key (or set ANTHROPIC_API_KEY env var).")
-    parser.add_argument("--save-images", metavar="DIR",
-                        help="Save rasterized page images for inspection.")
-    parser.add_argument("--save-db", action="store_true",
-                        help="Save parsed results to MySQL (uses DB_* env vars).")
-    parser.add_argument("--force", action="store_true",
-                        help="Re-process files already in the DB (overrides skip).")
+    parser = argparse.ArgumentParser(description="razetally -- Claude Vision parser for IEBC election result forms")
+    parser.add_argument("path", nargs="?", default="docs/forms", help="PDF file or directory of PDFs (default: docs/forms/)", )
+    parser.add_argument("--dpi",   type=int, default=300,help="Rasterization DPI (default: 300).")
+    parser.add_argument("--output", "-o", help="Save JSON here (file for single, directory for batch).")
+    parser.add_argument("--api-key", default=os.environ.get("ANTHROPIC_API_KEY"), help="Anthropic API key (or set ANTHROPIC_API_KEY env var).")
+    parser.add_argument("--save-images", metavar="DIR",help="Save rasterized page images for inspection.")
+    parser.add_argument("--save-db", action="store_true",help="Save parsed results to MySQL (uses DB_* env vars).")
+    parser.add_argument("--force", action="store_true", help="Re-process files already in the DB (overrides skip).")
 
     args = parser.parse_args()
 

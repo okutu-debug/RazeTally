@@ -76,7 +76,7 @@ def _image_blocks(images: dict[int, Image.Image]) -> list:
     return blocks
 
 
-def _claude_request(content: list, api_key: str, max_tokens: int = 2048) -> str:
+def claude_request(content: list, api_key: str, max_tokens: int = 2048) -> str:
     payload = json.dumps({
         "model": ANTHROPIC_MODEL,
         "max_tokens": max_tokens,
@@ -112,15 +112,29 @@ def parse_form_vision(images: dict[int, Image.Image], api_key: str) -> dict:
     img_blocks = _image_blocks(images)
 
     print("  Pass 1: extracting candidates...", end=" ", flush=True)
-    candidates = json.loads(
-        _claude_request([{"type": "text", "text": CANDIDATES_PROMPT}] + img_blocks, api_key)
+    raw_candidates = claude_request(
+        [{"type": "text", "text": CANDIDATES_PROMPT}] + img_blocks, api_key
     )
+    try:
+        candidates = json.loads(raw_candidates)
+    except json.JSONDecodeError:
+        raise ValueError(
+            "The uploaded file does not appear to be a valid IEBC election results form. "
+            "Please check that you selected the correct document."
+        )
     print(f"done ({len(candidates)} candidates)")
 
     print("  Pass 2: extracting metadata...", end=" ", flush=True)
-    metadata = json.loads(
-        _claude_request([{"type": "text", "text": METADATA_PROMPT}] + img_blocks, api_key)
+    raw_metadata = claude_request(
+        [{"type": "text", "text": METADATA_PROMPT}] + img_blocks, api_key
     )
+    try:
+        metadata = json.loads(raw_metadata)
+    except json.JSONDecodeError:
+        raise ValueError(
+            "Could not extract form metadata. "
+            "Please check that the document is a clear, complete IEBC election results form."
+        )
     print("done")
 
     metadata["candidates"] = candidates

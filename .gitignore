@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Secrets — real values belong in a local .env only, never in git
+.env
+

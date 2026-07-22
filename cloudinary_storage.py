@@ -60,6 +60,7 @@ def upload(file_bytes: bytes, folder: str, public_id: str | None = None) -> str 
     Cloudinary appends its own detected-format extension and would
     otherwise double it up (e.g. "...photo.jpg.jpg")."""
     if not _configure():
+        print(f"cloudinary_storage.upload: not configured (CLOUDINARY_URL unset?) — falling back to local disk for folder {folder!r}")
         return None
     if public_id:
         public_id = os.path.splitext(public_id)[0]

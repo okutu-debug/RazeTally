@@ -72,7 +72,8 @@ def upload(file_bytes: bytes, folder: str, public_id: str | None = None) -> str 
             overwrite=True,
         )
         return result.get("secure_url")
-    except Exception:
+    except Exception as e:
+        print(f"cloudinary_storage.upload: failed to upload to folder {folder!r}: {e!r}")
         return None
 
 
@@ -98,8 +99,8 @@ def destroy(url: str) -> None:
         return
     try:
         cloudinary.uploader.destroy(public_id, resource_type=resource_type)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"cloudinary_storage.destroy: failed to delete {url!r}: {e!r}")
 
 
 def fetch_bytes(url: str) -> bytes | None:
@@ -110,5 +111,6 @@ def fetch_bytes(url: str) -> bytes | None:
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
         return resp.content
-    except Exception:
+    except Exception as e:
+        print(f"cloudinary_storage.fetch_bytes: failed to fetch {url!r}: {e!r}")
         return None

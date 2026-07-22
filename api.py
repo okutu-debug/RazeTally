@@ -23,11 +23,12 @@ load_dotenv()
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from PIL import Image
 from pydantic import BaseModel, Field
 
+import cloudinary_storage
 from auth import SECRET_KEY, create_token, decode_token, verify_password
 from db import (
     ACTIVITY_PRIORITIES,
@@ -137,6 +138,7 @@ from db import (
     get_campaign_location_media,
     get_campaign_location_media_bytes,
     get_campaign_team,
+    get_candidate,
     get_candidate_photo_bytes,
     get_constituency,
     get_contribution,
@@ -146,12 +148,14 @@ from db import (
     get_db_connection,
     get_election_team,
     get_event,
+    get_feed_post_image,
     get_feed_post_image_bytes,
     get_incoming_call,
     get_interview_question,
     get_job_description,
     get_material,
     get_opinion_poll,
+    get_party,
     get_party_logo_bytes,
     get_party_member,
     get_polling_station,
@@ -818,6 +822,11 @@ def api_list_parties():
 
 @app.get("/parties/{party_id}/logo", summary="Public: fetch a party's logo image", tags=["Dashboard"])
 def api_get_party_logo(party_id: str):
+    party = get_party(party_id)
+    if not party or not party.get("logo"):
+        raise HTTPException(status_code=404, detail="Logo not found.")
+    if cloudinary_storage.is_remote_ref(party["logo"]):
+        return RedirectResponse(party["logo"])
     result = get_party_logo_bytes(party_id)
     if not result:
         raise HTTPException(status_code=404, detail="Logo not found.")
@@ -840,6 +849,11 @@ def api_list_candidates(
 
 @app.get("/candidates/{candidate_id}/photo", summary="Public: fetch a candidate's photo", tags=["Dashboard"])
 def api_get_candidate_photo(candidate_id: str):
+    candidate = get_candidate(candidate_id)
+    if not candidate or not candidate.get("photo"):
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    if cloudinary_storage.is_remote_ref(candidate["photo"]):
+        return RedirectResponse(candidate["photo"])
     result = get_candidate_photo_bytes(candidate_id)
     if not result:
         raise HTTPException(status_code=404, detail="Photo not found.")
@@ -2614,6 +2628,11 @@ def api_list_feed_post_comments(post_id: int):
 
 @app.get("/feed/images/{image_id}", summary="Public: fetch a feed post image", tags=["Feed"])
 def api_get_feed_image(image_id: int):
+    image = get_feed_post_image(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found.")
+    if cloudinary_storage.is_remote_ref(image["filename"]):
+        return RedirectResponse(image["filename"])
     result = get_feed_post_image_bytes(image_id)
     if not result:
         raise HTTPException(status_code=404, detail="Image not found.")

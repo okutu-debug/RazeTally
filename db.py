@@ -7138,14 +7138,19 @@ def list_feed_post_images(post_id) -> list[dict]:
     return rows
 
 
-def get_feed_post_image_bytes(image_id: int) -> tuple[bytes, str] | None:
-    """Return (file_bytes, display_filename) for download, or None if missing."""
+def get_feed_post_image(image_id: int) -> dict | None:
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM `feed_post_images` WHERE id = %s", (image_id,))
     row = cursor.fetchone()
     cursor.close()
     conn.close()
+    return row
+
+
+def get_feed_post_image_bytes(image_id: int) -> tuple[bytes, str] | None:
+    """Return (file_bytes, display_filename) for download, or None if missing."""
+    row = get_feed_post_image(image_id)
     if not row:
         return None
     display_name = row["original_filename"] or row["filename"]

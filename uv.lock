@@ -228,6 +228,20 @@ wheels = [
 ]
 
 [[package]]
+name = "cloudinary"
+version = "1.45.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "six" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/5b/d17312bcebe524fc28a4b9032fc158737e991cde49cef7f86d18593c50c9/cloudinary-1.45.0.tar.gz", hash = "sha256:711404bfbdf87965afbefdb747ae78a03188b513846cccb0c1f8a8c612e375ba", size = 192094, upload-time = "2026-07-01T10:10:29.688Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/6d/5419a09c4ec2b7baf2723fbfc823bfbfea9ceeac177b30e01250ed23da2c/cloudinary-1.45.0-py3-none-any.whl", hash = "sha256:46c333101811841cf446c46054f4d9b507c2fa34c25152d1e922586c3b746196", size = 149030, upload-time = "2026-07-01T10:10:28.561Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -811,6 +825,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "bcrypt" },
+    { name = "cloudinary" },
     { name = "fastapi" },
     { name = "mysql-connector-python" },
     { name = "pandas" },
@@ -819,6 +834,7 @@ dependencies = [
     { name = "pyjwt" },
     { name = "pymupdf" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "streamlit" },
     { name = "streamlit-sortables" },
     { name = "uvicorn" },
@@ -827,6 +843,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "bcrypt", specifier = ">=4.0.0" },
+    { name = "cloudinary", specifier = ">=1.45.0" },
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "mysql-connector-python", specifier = ">=9.7.0" },
     { name = "pandas", specifier = ">=2.0.0" },
@@ -835,6 +852,7 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.8.0" },
     { name = "pymupdf", specifier = ">=1.27.2.3" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "requests", specifier = ">=2.34.2" },
     { name = "streamlit", specifier = ">=1.25.0" },
     { name = "streamlit-sortables", specifier = ">=0.3.1" },
     { name = "uvicorn", specifier = ">=0.30.0" },

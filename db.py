@@ -8,6 +8,7 @@ from pathlib import Path
 
 import mysql.connector
 
+import cloudinary_storage
 from form_types import FORM_TYPE_MAP, TALLY_CONFIG
 
 # Anchored to this file's directory (not the process's CWD) so uploads land in
@@ -753,7 +754,10 @@ def delete_user(username: str) -> None:
     cursor.execute("SELECT filename FROM `user_documents` WHERE username = %s", (username,))
     doc_files = [r["filename"] for r in cursor.fetchall()]
     for fname in doc_files:
-        (USER_DOCS_DIR / username / fname).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(fname):
+            cloudinary_storage.destroy(fname)
+        else:
+            (USER_DOCS_DIR / username / fname).unlink(missing_ok=True)
 
     cursor.execute("DELETE FROM `users` WHERE username = %s", (username,))
     cursor.execute("DELETE FROM `user_polling_stations` WHERE username = %s", (username,))
@@ -1959,10 +1963,14 @@ def init_user_documents():
 
 
 def save_user_document_file(username: str, original_filename: str, file_bytes: bytes) -> str:
-    """Write uploaded bytes under USER_DOCS_DIR/<username>/ and return the
+    """Upload to Cloudinary if configured; otherwise write uploaded bytes
+    under USER_DOCS_DIR/<username>/. Returns either the Cloudinary URL or the
     unique stored filename (safe for the filesystem, collision-free)."""
     safe_name = os.path.basename(original_filename).replace("/", "_").replace("\\", "_")
     stored_name = f"{int(time.time() * 1000)}_{safe_name}"
+    remote_url = cloudinary_storage.upload(file_bytes, folder=f"razetally/user_documents/{username}", public_id=stored_name)
+    if remote_url:
+        return remote_url
     user_dir = USER_DOCS_DIR / username
     user_dir.mkdir(parents=True, exist_ok=True)
     (user_dir / stored_name).write_bytes(file_bytes)
@@ -2013,10 +2021,14 @@ def get_user_document_bytes(doc_id: int) -> tuple[bytes, str] | None:
     doc = get_user_document(doc_id)
     if not doc:
         return None
+    display_name = doc["original_filename"] or doc["filename"]
+    if cloudinary_storage.is_remote_ref(doc["filename"]):
+        data = cloudinary_storage.fetch_bytes(doc["filename"])
+        return (data, display_name) if data is not None else None
     path = USER_DOCS_DIR / doc["username"] / doc["filename"]
     if not path.exists():
         return None
-    return path.read_bytes(), (doc["original_filename"] or doc["filename"])
+    return path.read_bytes(), display_name
 
 
 def delete_user_document(doc_id: int) -> None:
@@ -2025,7 +2037,10 @@ def delete_user_document(doc_id: int) -> None:
     cursor.execute("SELECT username, filename FROM `user_documents` WHERE id = %s", (doc_id,))
     row = cursor.fetchone()
     if row:
-        (USER_DOCS_DIR / row["username"] / row["filename"]).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(row["filename"]):
+            cloudinary_storage.destroy(row["filename"])
+        else:
+            (USER_DOCS_DIR / row["username"] / row["filename"]).unlink(missing_ok=True)
     cursor.execute("DELETE FROM `user_documents` WHERE id = %s", (doc_id,))
     conn.commit()
     cursor.close()
@@ -2799,7 +2814,10 @@ def delete_application(id: str) -> None:
     cursor.execute("SELECT filename FROM `applicant_documents` WHERE application_id = %s", (id,))
     doc_files = [r["filename"] for r in cursor.fetchall()]
     for fname in doc_files:
-        (APPLICANT_DOCS_DIR / str(id) / fname).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(fname):
+            cloudinary_storage.destroy(fname)
+        else:
+            (APPLICANT_DOCS_DIR / str(id) / fname).unlink(missing_ok=True)
 
     # `applicant_documents` rows are removed automatically via ON DELETE CASCADE.
     cursor.execute("DELETE FROM `applications` WHERE id = %s", (id,))
@@ -2823,7 +2841,10 @@ def delete_applications(ids: list[str]) -> None:
         tuple(ids),
     )
     for row in cursor.fetchall():
-        (APPLICANT_DOCS_DIR / str(row["application_id"]) / row["filename"]).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(row["filename"]):
+            cloudinary_storage.destroy(row["filename"])
+        else:
+            (APPLICANT_DOCS_DIR / str(row["application_id"]) / row["filename"]).unlink(missing_ok=True)
 
     cursor.execute(f"DELETE FROM `applications` WHERE id IN ({placeholders})", tuple(ids))
     conn.commit()
@@ -3176,11 +3197,16 @@ def update_party(id: str, name: str) -> None:
 
 def delete_party(id: str) -> None:
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT logo FROM `parties` WHERE id = %s", (id,))
+    row = cursor.fetchone()
+    old_logo = row["logo"] if row else None
     cursor.execute("DELETE FROM `parties` WHERE id = %s", (id,))
     conn.commit()
     cursor.close()
     conn.close()
+    if old_logo and cloudinary_storage.is_remote_ref(old_logo):
+        cloudinary_storage.destroy(old_logo)
     logo_dir = PARTY_LOGOS_DIR / str(id)
     for f in logo_dir.glob("*"):
         f.unlink(missing_ok=True)
@@ -3211,27 +3237,36 @@ def bulk_upsert_parties(names: list[str]) -> tuple[int, int]:
 
 
 def set_party_logo(party_id, original_filename: str, file_bytes: bytes) -> str:
-    """Write the new logo under PARTY_LOGOS_DIR/<party_id>/, point
-    parties.logo at it, and delete the previous logo file (if any)."""
+    """Upload to Cloudinary if configured, otherwise write the new logo under
+    PARTY_LOGOS_DIR/<party_id>/. Points parties.logo at it and deletes the
+    previous logo (from Cloudinary or disk, whichever it was on)."""
     safe_name = os.path.basename(original_filename).replace("/", "_").replace("\\", "_")
     stored_name = f"{int(time.time() * 1000)}_{safe_name}"
     party_dir = PARTY_LOGOS_DIR / str(party_id)
-    party_dir.mkdir(parents=True, exist_ok=True)
-    (party_dir / stored_name).write_bytes(file_bytes)
+    remote_url = cloudinary_storage.upload(file_bytes, folder=f"razetally/party_logos/{party_id}", public_id=stored_name)
+    if remote_url:
+        stored_value = remote_url
+    else:
+        party_dir.mkdir(parents=True, exist_ok=True)
+        (party_dir / stored_name).write_bytes(file_bytes)
+        stored_value = stored_name
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT logo FROM `parties` WHERE id = %s", (party_id,))
     row = cursor.fetchone()
     old_logo = row["logo"] if row else None
-    cursor.execute("UPDATE `parties` SET logo=%s WHERE id=%s", (stored_name, party_id))
+    cursor.execute("UPDATE `parties` SET logo=%s WHERE id=%s", (stored_value, party_id))
     conn.commit()
     cursor.close()
     conn.close()
 
-    if old_logo and old_logo != stored_name:
-        (party_dir / old_logo).unlink(missing_ok=True)
-    return stored_name
+    if old_logo and old_logo != stored_value:
+        if cloudinary_storage.is_remote_ref(old_logo):
+            cloudinary_storage.destroy(old_logo)
+        else:
+            (party_dir / old_logo).unlink(missing_ok=True)
+    return stored_value
 
 
 def remove_party_logo(party_id) -> None:
@@ -3245,7 +3280,10 @@ def remove_party_logo(party_id) -> None:
     cursor.close()
     conn.close()
     if old_logo:
-        (PARTY_LOGOS_DIR / str(party_id) / old_logo).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(old_logo):
+            cloudinary_storage.destroy(old_logo)
+        else:
+            (PARTY_LOGOS_DIR / str(party_id) / old_logo).unlink(missing_ok=True)
 
 
 def get_party_logo_bytes(party_id) -> tuple[bytes, str] | None:
@@ -3257,6 +3295,9 @@ def get_party_logo_bytes(party_id) -> tuple[bytes, str] | None:
     conn.close()
     if not row or not row["logo"]:
         return None
+    if cloudinary_storage.is_remote_ref(row["logo"]):
+        data = cloudinary_storage.fetch_bytes(row["logo"])
+        return (data, row["logo"]) if data is not None else None
     path = PARTY_LOGOS_DIR / str(party_id) / row["logo"]
     if not path.exists():
         return None
@@ -3441,11 +3482,16 @@ def update_candidate(
 
 def delete_candidate(id: str) -> None:
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT photo FROM `candidates` WHERE id = %s", (id,))
+    row = cursor.fetchone()
+    old_photo = row["photo"] if row else None
     cursor.execute("DELETE FROM `candidates` WHERE id = %s", (id,))
     conn.commit()
     cursor.close()
     conn.close()
+    if old_photo and cloudinary_storage.is_remote_ref(old_photo):
+        cloudinary_storage.destroy(old_photo)
     photo_dir = CANDIDATE_PHOTOS_DIR / str(id)
     for f in photo_dir.glob("*"):
         f.unlink(missing_ok=True)
@@ -3489,27 +3535,37 @@ def bulk_upsert_candidates(rows: list[dict]) -> tuple[int, int]:
 
 
 def set_candidate_photo(candidate_id, original_filename: str, file_bytes: bytes) -> str:
-    """Write the new photo under CANDIDATE_PHOTOS_DIR/<candidate_id>/, point
-    candidates.photo at it, and delete the previous photo file (if any)."""
+    """Upload to Cloudinary if configured, otherwise write the new photo
+    under CANDIDATE_PHOTOS_DIR/<candidate_id>/. Points candidates.photo at it
+    and deletes the previous photo (from Cloudinary or disk, whichever it
+    was on)."""
     safe_name = os.path.basename(original_filename).replace("/", "_").replace("\\", "_")
     stored_name = f"{int(time.time() * 1000)}_{safe_name}"
     cand_dir = CANDIDATE_PHOTOS_DIR / str(candidate_id)
-    cand_dir.mkdir(parents=True, exist_ok=True)
-    (cand_dir / stored_name).write_bytes(file_bytes)
+    remote_url = cloudinary_storage.upload(file_bytes, folder=f"razetally/candidate_photos/{candidate_id}", public_id=stored_name)
+    if remote_url:
+        stored_value = remote_url
+    else:
+        cand_dir.mkdir(parents=True, exist_ok=True)
+        (cand_dir / stored_name).write_bytes(file_bytes)
+        stored_value = stored_name
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT photo FROM `candidates` WHERE id = %s", (candidate_id,))
     row = cursor.fetchone()
     old_photo = row["photo"] if row else None
-    cursor.execute("UPDATE `candidates` SET photo=%s WHERE id=%s", (stored_name, candidate_id))
+    cursor.execute("UPDATE `candidates` SET photo=%s WHERE id=%s", (stored_value, candidate_id))
     conn.commit()
     cursor.close()
     conn.close()
 
-    if old_photo and old_photo != stored_name:
-        (cand_dir / old_photo).unlink(missing_ok=True)
-    return stored_name
+    if old_photo and old_photo != stored_value:
+        if cloudinary_storage.is_remote_ref(old_photo):
+            cloudinary_storage.destroy(old_photo)
+        else:
+            (cand_dir / old_photo).unlink(missing_ok=True)
+    return stored_value
 
 
 def remove_candidate_photo(candidate_id) -> None:
@@ -3523,7 +3579,10 @@ def remove_candidate_photo(candidate_id) -> None:
     cursor.close()
     conn.close()
     if old_photo:
-        (CANDIDATE_PHOTOS_DIR / str(candidate_id) / old_photo).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(old_photo):
+            cloudinary_storage.destroy(old_photo)
+        else:
+            (CANDIDATE_PHOTOS_DIR / str(candidate_id) / old_photo).unlink(missing_ok=True)
 
 
 def get_candidate_photo_bytes(candidate_id) -> tuple[bytes, str] | None:
@@ -3535,6 +3594,9 @@ def get_candidate_photo_bytes(candidate_id) -> tuple[bytes, str] | None:
     conn.close()
     if not row or not row["photo"]:
         return None
+    if cloudinary_storage.is_remote_ref(row["photo"]):
+        data = cloudinary_storage.fetch_bytes(row["photo"])
+        return (data, row["photo"]) if data is not None else None
     path = CANDIDATE_PHOTOS_DIR / str(candidate_id) / row["photo"]
     if not path.exists():
         return None
@@ -4145,10 +4207,16 @@ def init_applicant_documents():
 
 
 def save_applicant_document_file(application_id, original_filename: str, file_bytes: bytes) -> str:
-    """Write uploaded bytes under APPLICANT_DOCS_DIR/<application_id>/ and
-    return the unique stored filename (safe for the filesystem, collision-free)."""
+    """Upload to Cloudinary if configured; otherwise write uploaded bytes
+    under APPLICANT_DOCS_DIR/<application_id>/. Returns either the Cloudinary
+    URL or the unique stored filename (safe for the filesystem, collision-free)."""
     safe_name = os.path.basename(original_filename).replace("/", "_").replace("\\", "_")
     stored_name = f"{int(time.time() * 1000)}_{safe_name}"
+    remote_url = cloudinary_storage.upload(
+        file_bytes, folder=f"razetally/applicant_documents/{application_id}", public_id=stored_name,
+    )
+    if remote_url:
+        return remote_url
     app_dir = APPLICANT_DOCS_DIR / str(application_id)
     app_dir.mkdir(parents=True, exist_ok=True)
     (app_dir / stored_name).write_bytes(file_bytes)
@@ -4218,10 +4286,14 @@ def get_applicant_document_bytes(doc_id: int) -> tuple[bytes, str] | None:
     doc = get_applicant_document(doc_id)
     if not doc:
         return None
+    display_name = doc["original_filename"] or doc["filename"]
+    if cloudinary_storage.is_remote_ref(doc["filename"]):
+        data = cloudinary_storage.fetch_bytes(doc["filename"])
+        return (data, display_name) if data is not None else None
     path = APPLICANT_DOCS_DIR / str(doc["application_id"]) / doc["filename"]
     if not path.exists():
         return None
-    return path.read_bytes(), (doc["original_filename"] or doc["filename"])
+    return path.read_bytes(), display_name
 
 
 def delete_applicant_document(doc_id: int) -> None:
@@ -4230,7 +4302,10 @@ def delete_applicant_document(doc_id: int) -> None:
     cursor.execute("SELECT application_id, filename FROM `applicant_documents` WHERE id = %s", (doc_id,))
     row = cursor.fetchone()
     if row:
-        (APPLICANT_DOCS_DIR / str(row["application_id"]) / row["filename"]).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(row["filename"]):
+            cloudinary_storage.destroy(row["filename"])
+        else:
+            (APPLICANT_DOCS_DIR / str(row["application_id"]) / row["filename"]).unlink(missing_ok=True)
     cursor.execute("DELETE FROM `applicant_documents` WHERE id = %s", (doc_id,))
     conn.commit()
     cursor.close()
@@ -4787,9 +4862,15 @@ def delete_campaign_location(id: str) -> None:
     media_files = [r["filename"] for r in cursor.fetchall()]
 
     if banner:
-        (CAMPAIGN_BANNERS_DIR / str(id) / banner).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(banner):
+            cloudinary_storage.destroy(banner)
+        else:
+            (CAMPAIGN_BANNERS_DIR / str(id) / banner).unlink(missing_ok=True)
     for fname in media_files:
-        (CAMPAIGN_MEDIA_DIR / str(id) / fname).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(fname):
+            cloudinary_storage.destroy(fname)
+        else:
+            (CAMPAIGN_MEDIA_DIR / str(id) / fname).unlink(missing_ok=True)
 
     # `campaign_location_media` rows are removed automatically via ON DELETE CASCADE.
     cursor.execute("DELETE FROM `campaign_locations` WHERE id = %s", (id,))
@@ -4806,14 +4887,21 @@ def delete_campaign_location(id: str) -> None:
 # ── Campaign location banner (single photo, shown on the public site) ───────
 
 def set_campaign_location_banner(location_id, original_filename: str, file_bytes: bytes) -> str:
-    """Write the new banner under CAMPAIGN_BANNERS_DIR/<location_id>/, point
-    campaign_locations.banner_image at it, and delete the previous banner
-    file (if any). Returns the new stored filename."""
+    """Upload to Cloudinary if configured, otherwise write the new banner
+    under CAMPAIGN_BANNERS_DIR/<location_id>/. Points
+    campaign_locations.banner_image at it, and deletes the previous banner
+    (from Cloudinary or disk, whichever it was on). Returns the new stored
+    value (a Cloudinary URL or a local filename)."""
     safe_name = os.path.basename(original_filename).replace("/", "_").replace("\\", "_")
     stored_name = f"{int(time.time() * 1000)}_{safe_name}"
     loc_dir = CAMPAIGN_BANNERS_DIR / str(location_id)
-    loc_dir.mkdir(parents=True, exist_ok=True)
-    (loc_dir / stored_name).write_bytes(file_bytes)
+    remote_url = cloudinary_storage.upload(file_bytes, folder=f"razetally/campaign_banners/{location_id}", public_id=stored_name)
+    if remote_url:
+        stored_value = remote_url
+    else:
+        loc_dir.mkdir(parents=True, exist_ok=True)
+        (loc_dir / stored_name).write_bytes(file_bytes)
+        stored_value = stored_name
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -4821,15 +4909,18 @@ def set_campaign_location_banner(location_id, original_filename: str, file_bytes
     row = cursor.fetchone()
     old_banner = row["banner_image"] if row else None
     cursor.execute(
-        "UPDATE `campaign_locations` SET banner_image=%s WHERE id=%s", (stored_name, location_id),
+        "UPDATE `campaign_locations` SET banner_image=%s WHERE id=%s", (stored_value, location_id),
     )
     conn.commit()
     cursor.close()
     conn.close()
 
-    if old_banner and old_banner != stored_name:
-        (loc_dir / old_banner).unlink(missing_ok=True)
-    return stored_name
+    if old_banner and old_banner != stored_value:
+        if cloudinary_storage.is_remote_ref(old_banner):
+            cloudinary_storage.destroy(old_banner)
+        else:
+            (loc_dir / old_banner).unlink(missing_ok=True)
+    return stored_value
 
 
 def remove_campaign_location_banner(location_id) -> None:
@@ -4843,12 +4934,15 @@ def remove_campaign_location_banner(location_id) -> None:
     cursor.close()
     conn.close()
     if old_banner:
-        (CAMPAIGN_BANNERS_DIR / str(location_id) / old_banner).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(old_banner):
+            cloudinary_storage.destroy(old_banner)
+        else:
+            (CAMPAIGN_BANNERS_DIR / str(location_id) / old_banner).unlink(missing_ok=True)
 
 
 def get_campaign_location_banner_bytes(location_id) -> tuple[bytes, str] | None:
     """Return (file_bytes, stored_filename) for the location's banner, or
-    None if there's no banner set or the file is missing on disk."""
+    None if there's no banner set or the file is missing."""
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT banner_image FROM `campaign_locations` WHERE id = %s", (location_id,))
@@ -4857,6 +4951,9 @@ def get_campaign_location_banner_bytes(location_id) -> tuple[bytes, str] | None:
     conn.close()
     if not row or not row["banner_image"]:
         return None
+    if cloudinary_storage.is_remote_ref(row["banner_image"]):
+        data = cloudinary_storage.fetch_bytes(row["banner_image"])
+        return (data, row["banner_image"]) if data is not None else None
     path = CAMPAIGN_BANNERS_DIR / str(location_id) / row["banner_image"]
     if not path.exists():
         return None
@@ -4891,10 +4988,14 @@ def init_campaign_location_media():
 
 
 def save_campaign_media_file(location_id, original_filename: str, file_bytes: bytes) -> str:
-    """Write uploaded bytes under CAMPAIGN_MEDIA_DIR/<location_id>/ and
-    return the unique stored filename (safe for the filesystem, collision-free)."""
+    """Upload to Cloudinary if configured; otherwise write uploaded bytes
+    under CAMPAIGN_MEDIA_DIR/<location_id>/. Returns either the Cloudinary
+    URL or the unique stored filename (safe for the filesystem, collision-free)."""
     safe_name = os.path.basename(original_filename).replace("/", "_").replace("\\", "_")
     stored_name = f"{int(time.time() * 1000)}_{safe_name}"
+    remote_url = cloudinary_storage.upload(file_bytes, folder=f"razetally/campaign_media/{location_id}", public_id=stored_name)
+    if remote_url:
+        return remote_url
     loc_dir = CAMPAIGN_MEDIA_DIR / str(location_id)
     loc_dir.mkdir(parents=True, exist_ok=True)
     (loc_dir / stored_name).write_bytes(file_bytes)
@@ -4944,10 +5045,14 @@ def get_campaign_location_media_bytes(media_id: int) -> tuple[bytes, str] | None
     media = get_campaign_location_media(media_id)
     if not media:
         return None
+    display_name = media["original_filename"] or media["filename"]
+    if cloudinary_storage.is_remote_ref(media["filename"]):
+        data = cloudinary_storage.fetch_bytes(media["filename"])
+        return (data, display_name) if data is not None else None
     path = CAMPAIGN_MEDIA_DIR / str(media["location_id"]) / media["filename"]
     if not path.exists():
         return None
-    return path.read_bytes(), (media["original_filename"] or media["filename"])
+    return path.read_bytes(), display_name
 
 
 def delete_campaign_location_media(media_id: int) -> None:
@@ -4962,7 +5067,10 @@ def delete_campaign_location_media(media_id: int) -> None:
     cursor.close()
     conn.close()
     if row:
-        (CAMPAIGN_MEDIA_DIR / str(row["location_id"]) / row["filename"]).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(row["filename"]):
+            cloudinary_storage.destroy(row["filename"])
+        else:
+            (CAMPAIGN_MEDIA_DIR / str(row["location_id"]) / row["filename"]).unlink(missing_ok=True)
 
 
 # ── Campaign location team members ───────────────────────────────────────────
@@ -6970,7 +7078,10 @@ def delete_feed_post(id) -> None:
     cursor.execute("SELECT filename FROM `feed_post_images` WHERE post_id = %s", (id,))
     image_files = [r["filename"] for r in cursor.fetchall()]
     for fname in image_files:
-        (FEED_IMAGES_DIR / str(id) / fname).unlink(missing_ok=True)
+        if cloudinary_storage.is_remote_ref(fname):
+            cloudinary_storage.destroy(fname)
+        else:
+            (FEED_IMAGES_DIR / str(id) / fname).unlink(missing_ok=True)
 
     # `feed_post_images`, `feed_post_likes`, and `feed_post_comments` rows are
     # removed automatically via ON DELETE CASCADE.
@@ -6987,10 +7098,14 @@ def delete_feed_post(id) -> None:
 # ── Feed post images ─────────────────────────────────────────────────────────
 
 def save_feed_post_image_file(post_id, original_filename: str, file_bytes: bytes) -> str:
-    """Write uploaded bytes under FEED_IMAGES_DIR/<post_id>/ and return the
-    unique stored filename (safe for the filesystem, collision-free)."""
+    """Upload to Cloudinary if configured; otherwise write uploaded bytes
+    under FEED_IMAGES_DIR/<post_id>/. Returns either the Cloudinary URL or
+    the unique stored filename (safe for the filesystem, collision-free)."""
     safe_name = os.path.basename(original_filename).replace("/", "_").replace("\\", "_")
     stored_name = f"{int(time.time() * 1000)}_{safe_name}"
+    remote_url = cloudinary_storage.upload(file_bytes, folder=f"razetally/feed_images/{post_id}", public_id=stored_name)
+    if remote_url:
+        return remote_url
     post_dir = FEED_IMAGES_DIR / str(post_id)
     post_dir.mkdir(parents=True, exist_ok=True)
     (post_dir / stored_name).write_bytes(file_bytes)
@@ -7033,10 +7148,14 @@ def get_feed_post_image_bytes(image_id: int) -> tuple[bytes, str] | None:
     conn.close()
     if not row:
         return None
+    display_name = row["original_filename"] or row["filename"]
+    if cloudinary_storage.is_remote_ref(row["filename"]):
+        data = cloudinary_storage.fetch_bytes(row["filename"])
+        return (data, display_name) if data is not None else None
     path = FEED_IMAGES_DIR / str(row["post_id"]) / row["filename"]
     if not path.exists():
         return None
-    return path.read_bytes(), (row["original_filename"] or row["filename"])
+    return path.read_bytes(), display_name
 
 
 # ── Feed post likes ──────────────────────────────────────────────────────────

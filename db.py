@@ -25,11 +25,17 @@ CANDIDATE_PHOTOS_DIR = DOCS_DIR / "candidate_photos"
 
 def get_db_connection():
     db_name = os.environ.get("DB_NAME", "tallydb")
+    # conn = mysql.connector.connect(
+    #     host=os.environ.get("DB_HOST", "localhost"),
+    #     user=os.environ.get("DB_USER", "root"),
+    #     password=os.environ.get("DB_PASSWORD", ""),
+    # )
     conn = mysql.connector.connect(
-        host=os.environ.get("DB_HOST", "localhost"),
+        host=os.environ.get("DB_HOST", "mysql.railway.internal"),
         user=os.environ.get("DB_USER", "root"),
-        password=os.environ.get("DB_PASSWORD", ""),
+        password=os.environ.get("DB_PASSWORD", "UWUzeOrmFQjLhtmDhBchrgZWWqWDTBju"),
     )
+    
     conn.cursor().execute(
         f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
         "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"

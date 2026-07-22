@@ -311,11 +311,11 @@ app = FastAPI(
 # from a browser — e.g. PUBLIC_CORS_ORIGINS=https://apply.yourparty.org
 # Empty by default: no cross-origin browser access until explicitly configured.
 _public_cors_origins = [
-    "https://raze-tally-react.vercel.app",
-    "https://razetally.vercel.app",
-    "http://localhost:5173",
-    "https://razetallyreact-production.up.railway.app",
-    #o.strip() for o in os.environ.get("PUBLIC_CORS_ORIGINS", "").split(",") if o.strip()
+    # "https://raze-tally-react.vercel.app",
+    # "https://razetally.vercel.app",
+    # "http://localhost:5173",
+    # "https://razetallyreact-production.up.railway.app",
+    o.strip() for o in os.environ.get("PUBLIC_CORS_ORIGINS", "").split(",") if o.strip()
 ]
 if _public_cors_origins:
     app.add_middleware(

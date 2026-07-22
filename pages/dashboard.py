@@ -310,6 +310,36 @@ def _color_for(seed: str) -> str:
     return _AVATAR_PALETTE[h % len(_AVATAR_PALETTE)]
 
 
+def _unique_colors_for(names: list[str]) -> dict[str, str]:
+    """Each name's stable hash-based color (kept in sync with the outward-
+    facing site's Avatar component) — except when two names in the same list
+    would hash to the same color, in which case the later one is bumped to
+    the next unused palette color so no two candidates in one race ever look
+    identical. Falls back to generated hues if there are more names than the
+    palette has colors for."""
+    assigned: dict[str, str] = {}
+    used: set[str] = set()
+    for name in names:
+        color = _color_for(name)
+        if color not in used:
+            assigned[name] = color
+            used.add(color)
+
+    unused = [c for c in _AVATAR_PALETTE if c not in used]
+    extra = 0
+    remaining = [n for n in names if n not in assigned]
+    for name in remaining:
+        if unused:
+            color = unused.pop(0)
+        else:
+            hue = (extra * 360 / max(len(remaining), 1)) % 360
+            color = f"hsl({hue:.0f}, 55%, 38%)"
+            extra += 1
+        assigned[name] = color
+        used.add(color)
+    return assigned
+
+
 def _initials(name: str) -> str:
     parts = [p for p in (name or "").strip().split() if p]
     if not parts:
@@ -328,6 +358,7 @@ def _tally_progress_bars(df, position: str | None = None):
     total = ranked["total_votes"].sum()
 
     candidates_by_name = _candidates_by_position(position) if position else {}
+    color_by_name = _unique_colors_for([row["candidate_name"] or "Unknown" for _, row in ranked.iterrows()])
 
     # Every line here must be flush-left with no leading whitespace: Streamlit's
     # markdown renderer treats 4+ leading spaces as a code block, which would
@@ -338,7 +369,7 @@ def _tally_progress_bars(df, position: str | None = None):
         name = row["candidate_name"] or "Unknown"
         votes = int(row["total_votes"] or 0)
         pct = (votes / total * 100) if total else 0
-        color = _color_for(name)
+        color = color_by_name[name]
 
         matched = candidates_by_name.get(name.strip().lower())
         party_name = matched.get("party_name") if matched else None
@@ -561,6 +592,7 @@ with st.container(key="card_tabs"):
             st.info("No tally data for the selected filter.")
         else:
             _tally_progress_bars(df_tally, position=FORM_TYPE_MAP[form_type][2])
+            st.caption(f"{ts['forms']} station{'s' if ts['forms'] != 1 else ''} counted")
             st.dataframe(
                 df_tally, use_container_width=True, hide_index=True,
                 column_config={"candidate_name": st.column_config.TextColumn(width="large")},

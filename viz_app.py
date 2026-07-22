@@ -483,6 +483,15 @@ st.markdown("""
         background: rgba(255,255,255,0.25) !important;
         border-color: white !important;
     }
+
+    /* On narrow/mobile viewports the sidebar becomes a full-width overlay
+       drawer, which this fixed-position header bar would sit on top of —
+       intercepting taps meant for the sidebar nav underneath it. Hide it
+       there; Logout is already in the sidebar itself, and Profile is
+       reachable via the "More" nav section. */
+    @media (max-width: 768px) {
+        div[class*="st-key-header_actions"] { display: none !important; }
+    }
     </style>
 """, unsafe_allow_html=True)
 

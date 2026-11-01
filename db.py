@@ -31,13 +31,28 @@ def get_db_connection():
     #     user=os.environ.get("DB_USER", "root"),
     #     password=os.environ.get("DB_PASSWORD", ""),
     # )
-    conn = mysql.connector.connect(
-        host=os.environ.get("DB_HOST", "mysql.railway.internal"),
+    params = dict(
+        host=os.environ.get("DB_HOST", "localhost"),
         port=int(os.environ.get("DB_PORT", 3306)),
         user=os.environ.get("DB_USER", "root"),
-        password=os.environ.get("DB_PASSWORD", "UWUzeOrmFQjLhtmDhBchrgZWWqWDTBju"),
+        password=os.environ.get("DB_PASSWORD", ""),
     )
-    
+    # Hosted MySQL (TiDB Cloud, Aiven, ...) requires TLS — verify against the
+    # certifi CA bundle so it works on any host without a system cert path.
+    if os.environ.get("DB_SSL", "").lower() == "true":
+        import certifi
+        params.update(ssl_ca=certifi.where(), ssl_verify_cert=True, ssl_verify_identity=True)
+    # Connect straight to the database and only CREATE it when it's missing.
+    # Running CREATE DATABASE on every connection needs an exclusive schema
+    # lock, which blocks forever behind any other open connection that has an
+    # uncommitted read in this schema (e.g. a nested connection inside a
+    # `with _conn()` block) — that deadlocked the Streamlit dashboard.
+    try:
+        return mysql.connector.connect(database=db_name, **params)
+    except mysql.connector.Error as e:
+        if e.errno != 1049:  # ER_BAD_DB_ERROR: unknown database
+            raise
+    conn = mysql.connector.connect(**params)
     conn.cursor().execute(
         f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
         "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"

@@ -4,7 +4,6 @@ __pycache__/
 build/
 dist/
 docs/
-outward-facing/
 wheels/
 *.egg-info
 
@@ -16,3 +15,8 @@ wheels/
 
 .vs
 
+
+# outward-facing/ React app build output and local env
+node_modules/
+outward-facing/dist/
+.env.local

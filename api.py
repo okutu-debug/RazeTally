@@ -2867,7 +2867,7 @@ def _run_job(job_id: str, pdf_path: Path, api_key: str, force: bool):
             _jobs[job_id].update({"status": "error", "error": str(exc)})
 
 
-@app.post("/upload", summary="Upload a form (PDF/PNG/JPG/TIFF/BMP/WEBP) — saves to docs/forms/, parses with Claude, writes to DB", tags=["Election Mgt"])
+@app.post("/upload", summary="Upload a form (PDF/PNG/JPG/TIFF/BMP/WEBP) — parses with Claude, writes to DB, stores the file in Cloudinary", tags=["Election Mgt"])
 async def upload_form(
     file: UploadFile,
     background_tasks: BackgroundTasks,

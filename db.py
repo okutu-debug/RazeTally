@@ -206,14 +206,19 @@ def _update_tally(cursor, structured: dict, form_type: str):
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def is_already_processed(source_file: str, form_type: str) -> bool:
-    """Return True if this file path is already saved in its form-type table."""
+    """Return True if this file path is already saved in its form-type table —
+    either as the same local path, or as a Cloudinary URL for the same filename."""
     forms_table, votes_table, _ = FORM_TYPE_MAP[form_type]
+    stem = Path(source_file).stem
+    for ch in ("\\", "%", "_"):
+        stem = stem.replace(ch, "\\" + ch)
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         _ensure_tables(cursor, forms_table, votes_table)
         cursor.execute(
-            f"SELECT id FROM `{forms_table}` WHERE source_file = %s", (source_file,)
+            f"SELECT id FROM `{forms_table}` WHERE source_file = %s OR source_file LIKE %s",
+            (source_file, f"https://%/razetally/forms/{stem}.%"),
         )
         found = cursor.fetchone() is not None
         cursor.close()

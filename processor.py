@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
+import cloudinary_storage
 from db import DOCS_DIR, find_duplicate_form_number, is_already_processed, save_to_db, user_can_access_station
 from form_types import FORM_TYPE_MAP, detect_form_type
 from parser import parse_form_vision
@@ -18,6 +19,28 @@ def save_upload(file_bytes: bytes, filename: str) -> Path:
     dest = FORMS_DIR / filename
     dest.write_bytes(file_bytes)
     return dest
+
+
+def _save_with_source(structured: dict, source_key: str, form_type: str, uploaded_by: str = "") -> int:
+    """save_to_db, but with the source file moved to Cloudinary first so it
+    survives on hosts with ephemeral disks. Falls back to storing the local
+    path if Cloudinary isn't configured or the upload fails. The local copy is
+    only deleted once the DB row is saved, so a failed save can be retried."""
+    path = Path(source_key)
+    stored = source_key
+    if not cloudinary_storage.is_remote_ref(source_key) and path.exists():
+        stored = cloudinary_storage.upload(path.read_bytes(), folder="razetally/forms", public_id=path.name) or source_key
+
+    try:
+        form_id = save_to_db(structured, stored, form_type, uploaded_by=uploaded_by)
+    except Exception:
+        if stored != source_key:
+            cloudinary_storage.destroy(stored)
+        raise
+
+    if stored != source_key:
+        path.unlink(missing_ok=True)
+    return form_id
 
 
 def parse_form(pdf_path: Path, api_key: str, dpi: int = 300, force: bool = False) -> dict:
@@ -77,7 +100,7 @@ def commit_form(parsed: dict, uploaded_by: str = "") -> int:
         )
 
     try:
-        return save_to_db(structured, source_key, form_type, uploaded_by=uploaded_by)
+        return _save_with_source(structured, source_key, form_type, uploaded_by=uploaded_by)
     except Exception as exc:
         raise RuntimeError(f"DB save failed: {exc}") from exc
 
@@ -135,7 +158,7 @@ def process_pdf(pdf_path: Path, api_key: str, dpi: int = 300, force: bool = Fals
         )
 
     try:
-        form_id = save_to_db(structured, source_key, form_type, uploaded_by=uploaded_by)
+        form_id = _save_with_source(structured, source_key, form_type, uploaded_by=uploaded_by)
     except Exception as exc:
         raise RuntimeError(f"DB save failed: {exc}") from exc
 

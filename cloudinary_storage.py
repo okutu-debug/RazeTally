@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import cloudinary
 import cloudinary.uploader
+import cloudinary.utils
 import requests
 
 _configured: bool | None = None
@@ -110,6 +111,14 @@ def fetch_bytes(url: str) -> bytes | None:
     where the file actually lives."""
     try:
         resp = requests.get(url, timeout=15)
+        if resp.status_code == 401 and _configure():
+            # Cloudinary blocks public delivery of PDF/ZIP files by default on
+            # free accounts — fetch through the signed API download instead.
+            public_id, resource_type = _parse_public_id(url)
+            fmt = os.path.splitext(urlparse(url).path)[1].lstrip(".")
+            if public_id:
+                signed = cloudinary.utils.private_download_url(public_id, fmt, resource_type=resource_type, type="upload")
+                resp = requests.get(signed, timeout=30)
         resp.raise_for_status()
         return resp.content
     except Exception as e:

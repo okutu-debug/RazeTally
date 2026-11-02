@@ -3,10 +3,12 @@ import mimetypes
 import numbers
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pandas as pd
 import streamlit as st
 
+import cloudinary_storage
 from db import get_db_connection, get_party_logo_bytes, list_candidates
 from form_types import FORM_TYPE_MAP, TALLY_CONFIG
 from theme import apply_theme
@@ -268,16 +270,23 @@ def _view_document_dialog(row):
         st.warning("No source file recorded for this form.")
         return
 
-    path = Path(source_file)
-    if not path.exists():
-        st.error(f"File not found on disk: {source_file}")
-        return
+    if cloudinary_storage.is_remote_ref(source_file):
+        path = Path(urlparse(source_file).path)
+        data = cloudinary_storage.fetch_bytes(source_file)
+        if data is None:
+            st.error(f"Could not download file: {source_file}")
+            return
+    else:
+        path = Path(source_file)
+        if not path.exists():
+            st.error(f"File not found on disk: {source_file}")
+            return
 
-    try:
-        data = path.read_bytes()
-    except Exception as e:
-        st.error(f"Could not read file: {e}")
-        return
+        try:
+            data = path.read_bytes()
+        except Exception as e:
+            st.error(f"Could not read file: {e}")
+            return
 
     suffix = path.suffix.lower()
     if suffix == ".pdf":

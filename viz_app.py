@@ -10,7 +10,7 @@ import streamlit.components.v1 as _components
 import base64
 from io import BytesIO
 from PIL import Image
-from auth import create_token, decode_token, is_revoked, revoke_token, verify_password
+from auth import create_handoff_token, create_token, decode_token, is_revoked, revoke_token, verify_password
 from db import decline_call, get_incoming_call, get_user, get_user_polling_stations, init_activities, init_applicant_documents, init_applications, init_calls, init_campaign_location_media, init_campaign_locations, init_campaign_materials, init_campaign_teams, init_candidates, init_chat_groups, init_chat_messages, init_contributions, init_demography, init_election_materials, init_election_teams, init_events, init_feed, init_interview_answers, init_interview_questions, init_job_descriptions, init_location_team, init_materials, init_opinion_polls, init_panel_assignments, init_parties, init_party_members, init_polling_stations, init_positions, init_revoked_tokens, init_team_assignments, init_user_documents, init_user_polling_stations, init_users, is_panelist, touch_presence
 
 st.set_page_config(page_title="RazeTally", layout="wide", initial_sidebar_state="expanded")
@@ -57,6 +57,18 @@ def _restore_session() -> bool:
     """Try to restore session from the HTTP cookie. Always synchronous."""
     if st.session_state.get("authenticated"):
         return True
+    # Action links append a short-lived handoff token (see _handoff_link_hook)
+    # because the cookie below never reaches the server on Streamlit Cloud.
+    handoff = st.query_params.get("_h")
+    if handoff:
+        del st.query_params["_h"]
+        payload = decode_token(handoff)
+        if payload and payload.get("typ") == "handoff":
+            st.session_state.authenticated = True
+            st.session_state.username = payload["sub"]
+            st.session_state.role = payload["role"]
+            st.session_state["_auth_token"] = create_token(payload["sub"], payload["role"])
+            return True
     token = _get_cookie_token()
     if not token or is_revoked(token):
         return False
@@ -223,6 +235,34 @@ def _presence_heartbeat():
     """Reruns on its own timer (independent of user interaction) so a session
     still counts as online while the user is idly reading a page."""
     touch_presence(st.session_state.username)
+    _handoff_link_hook()
+
+
+def _handoff_link_hook():
+    """Action links (<a href="?edit_x=..." target="_top">) do a full page
+    reload, which starts a new Streamlit session. Rewrite them on click to
+    carry a fresh handoff token so _restore_session can log the user back in.
+    Runs inside the heartbeat fragment so the token never goes stale."""
+    token = create_handoff_token(st.session_state.username, st.session_state.role)
+    _components.html(f"""
+<script>
+(function () {{
+    const doc = window.parent.document;
+    doc.body.dataset.razeHandoff = "{token}";
+    if (doc.body.dataset.razeHandoffHooked) return;
+    doc.body.dataset.razeHandoffHooked = "1";
+    doc.addEventListener('click', function (e) {{
+        const a = e.target.closest && e.target.closest('a[href]');
+        if (!a) return;
+        const href = a.getAttribute('href');
+        if (!href || !href.startsWith('?')) return;
+        const url = new URL(href, doc.baseURI);
+        url.searchParams.set('_h', doc.body.dataset.razeHandoff);
+        a.href = url.toString();
+    }}, true);
+}})();
+</script>
+""", height=0)
 
 
 _presence_heartbeat()

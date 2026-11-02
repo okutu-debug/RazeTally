@@ -35,6 +35,21 @@ def create_token(username: str, role: str) -> str:
     )
 
 
+HANDOFF_EXPIRE_MINUTES = 5
+
+
+def create_handoff_token(username: str, role: str) -> str:
+    """Short-lived token carried in action-link URLs so a full page reload can
+    restore the session where the auth cookie can't reach the server (e.g.
+    Streamlit Community Cloud's proxy)."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=HANDOFF_EXPIRE_MINUTES)
+    return jwt.encode(
+        {"sub": username, "role": role, "exp": expire, "typ": "handoff"},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
 def decode_token(token: str) -> dict | None:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])

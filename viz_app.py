@@ -242,24 +242,39 @@ def _handoff_link_hook():
     """Action links (<a href="?edit_x=..." target="_top">) do a full page
     reload, which starts a new Streamlit session. Rewrite them on click to
     carry a fresh handoff token so _restore_session can log the user back in.
-    Runs inside the heartbeat fragment so the token never goes stale."""
+    Runs inside the heartbeat fragment so the token never goes stale.
+
+    The click listener must be registered by a script running in the parent
+    page itself: browsers stop calling listeners registered from this
+    component iframe once Streamlit replaces it (every heartbeat / rerun)."""
     token = create_handoff_token(st.session_state.username, st.session_state.role)
     _components.html(f"""
 <script>
 (function () {{
-    const doc = window.parent.document;
+    const parent = window.parent;
+    const doc = parent.document;
     doc.body.dataset.razeHandoff = "{token}";
-    if (doc.body.dataset.razeHandoffHooked) return;
-    doc.body.dataset.razeHandoffHooked = "1";
-    doc.addEventListener('click', function (e) {{
+    const listener = `function (e) {{
         const a = e.target.closest && e.target.closest('a[href]');
         if (!a) return;
         const href = a.getAttribute('href');
         if (!href || !href.startsWith('?')) return;
-        const url = new URL(href, doc.baseURI);
-        url.searchParams.set('_h', doc.body.dataset.razeHandoff);
+        const url = new URL(href, document.baseURI);
+        url.searchParams.set('_h', document.body.dataset.razeHandoff);
         a.href = url.toString();
-    }}, true);
+    }}`;
+    if (!parent.__razeHandoffInstalled) {{
+        const s = doc.createElement('script');
+        s.textContent = "document.addEventListener('click', " + listener + ", true); window.__razeHandoffInstalled = true;";
+        doc.head.appendChild(s);
+    }}
+    if (!parent.__razeHandoffInstalled) {{
+        // Inline scripts blocked (CSP): register from this iframe instead and
+        // replace it from each new heartbeat iframe before this one goes away.
+        if (parent.__razeHandoffFallback) doc.removeEventListener('click', parent.__razeHandoffFallback, true);
+        parent.__razeHandoffFallback = new Function('return ' + listener.replaceAll('document', 'window.parent.document'))();
+        doc.addEventListener('click', parent.__razeHandoffFallback, true);
+    }}
 }})();
 </script>
 """, height=0)

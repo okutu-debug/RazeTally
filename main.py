@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from db import is_already_processed, save_to_db
-from form_types import FORM_TYPE_MAP, TALLY_CONFIG, detect_form_type
-from parser import parse_form_vision
+from form_types import FORM_TYPE_MAP, TALLY_CONFIG, detect_form_type, normalize_form_type
+from parser import get_vision_api_key, parse_form_vision
 from rasterizer import load_pages
 
 
@@ -23,18 +23,14 @@ def process_one(pdf_path: Path, args) -> bool:
     """Process a single PDF. Returns True on success."""
     source_key = str(pdf_path.resolve())
 
-    form_type = detect_form_type(pdf_path)
-    if form_type is None:
-        print(f"  [skip] unrecognised form type (filename must start with F34A-F39A): {pdf_path.name}")
-        return True
+    # Filename prefix is only a hint; the type printed on the form wins (see below).
+    filename_type = detect_form_type(pdf_path)
 
-    _, _, label = FORM_TYPE_MAP[form_type]
-
-    if args.save_db and not args.force and is_already_processed(source_key, form_type):
+    if args.save_db and not args.force and filename_type and is_already_processed(source_key, filename_type):
         print(f"  [skip] already in DB: {pdf_path.name}")
         return True
 
-    print(f"\n[razetally] {pdf_path.name}  [{label}]  (DPI: {args.dpi})")
+    print(f"\n[razetally] {pdf_path.name}  (DPI: {args.dpi})")
 
     try:
         page_images = load_pages(str(pdf_path), dpi=args.dpi)
@@ -54,6 +50,16 @@ def process_one(pdf_path: Path, args) -> bool:
     except Exception as e:
         print(f"  [!] Parse error: {e}")
         return False
+
+    form_type = normalize_form_type(structured.pop("form_type", None)) or filename_type
+    if form_type is None:
+        print(f"  [!] Could not determine form type (34A-39A) from the form or filename: {pdf_path.name}")
+        return False
+    print(f"  Form type: {form_type.upper()} [{FORM_TYPE_MAP[form_type][2]}]")
+
+    if args.save_db and not args.force and form_type != filename_type and is_already_processed(source_key, form_type):
+        print(f"  [skip] already in DB: {pdf_path.name}")
+        return True
 
     output_json = json.dumps(structured, indent=2, ensure_ascii=False)
 
@@ -88,7 +94,7 @@ def main():
     parser.add_argument("path", nargs="?", default="docs/forms", help="PDF file or directory of PDFs (default: docs/forms/)", )
     parser.add_argument("--dpi",   type=int, default=300,help="Rasterization DPI (default: 300).")
     parser.add_argument("--output", "-o", help="Save JSON here (file for single, directory for batch).")
-    parser.add_argument("--api-key", default=os.environ.get("ANTHROPIC_API_KEY"), help="Anthropic API key (or set ANTHROPIC_API_KEY env var).")
+    parser.add_argument("--api-key", default=get_vision_api_key()[0], help="Vision API key (default: ANTHROPIC_API_KEY, or GEMINI_API_KEY when VISION_PROVIDER=gemini).")
     parser.add_argument("--save-images", metavar="DIR",help="Save rasterized page images for inspection.")
     parser.add_argument("--save-db", action="store_true",help="Save parsed results to MySQL (uses DB_* env vars).")
     parser.add_argument("--force", action="store_true", help="Re-process files already in the DB (overrides skip).")
@@ -96,7 +102,7 @@ def main():
     args = parser.parse_args()
 
     if not args.api_key:
-        print("[!] No API key found. Set ANTHROPIC_API_KEY or pass --api-key.")
+        print(f"[!] No API key found. Set {get_vision_api_key()[1]} or pass --api-key.")
         return
 
     pdfs = collect_pdfs(Path(args.path))

@@ -303,6 +303,7 @@ from db import (
 from form_types import FORM_TYPE_MAP, TALLY_CONFIG
 from mpesa import MpesaError, stk_push
 from paypal import PayPalError, capture_order, create_order, get_approval_url
+from parser import get_vision_api_key
 from processor import process_pdf, save_upload
 
 app = FastAPI(
@@ -2881,9 +2882,9 @@ async def upload_form(
             detail=f"Unsupported file type. Accepted: {', '.join(sorted(ACCEPTED))}",
         )
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key, api_key_var = get_vision_api_key()
     if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not configured on the server.")
+        raise HTTPException(status_code=500, detail=f"{api_key_var} is not configured on the server.")
 
     contents = await file.read()
     pdf_path = save_upload(contents, file.filename)

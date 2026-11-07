@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from parser import get_vision_api_key
 from processor import commit_form, parse_form, save_upload
 from theme import apply_theme
 
@@ -13,9 +14,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+api_key, api_key_var = get_vision_api_key()
 if not api_key:
-    st.error("ANTHROPIC_API_KEY is not set — cannot parse uploaded forms.")
+    st.error(f"{api_key_var} is not set — cannot parse uploaded forms.")
     st.stop()
 
 if "parsed_form"   not in st.session_state:
@@ -105,7 +106,8 @@ elif st.session_state.parsed_form is not None:
 else:
     with st.container(key="card_upload"):
         st.caption(
-            "Filename must start with the form code, e.g. `F35A-003-017-....pdf`. "
+            "Upload a scan or photo of the form — any filename works; the form type "
+            "(34A–39A) is read from the form itself, so keep the header visible. "
             "Accepted formats: PDF, PNG, JPG, JPEG, TIFF, BMP, WEBP."
         )
         uploaded = st.file_uploader(

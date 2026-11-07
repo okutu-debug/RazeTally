@@ -4,6 +4,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from parser import get_vision_api_key
+from mobile_camera import camera_uploader
 from processor import commit_form, parse_form, save_upload
 from theme import apply_theme
 
@@ -13,9 +15,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+api_key, api_key_var = get_vision_api_key()
 if not api_key:
-    st.error("ANTHROPIC_API_KEY is not set — cannot parse uploaded forms.")
+    st.error(f"{api_key_var} is not set — cannot parse uploaded forms.")
     st.stop()
 
 if "parsed_form"   not in st.session_state:
@@ -105,13 +107,26 @@ elif st.session_state.parsed_form is not None:
 else:
     with st.container(key="card_upload"):
         st.caption(
-            "Filename must start with the form code, e.g. `F35A-003-017-....pdf`. "
-            "Accepted formats: PDF, PNG, JPG, JPEG, TIFF, BMP, WEBP."
+            "Take a photo of the form or upload a scan. Keep the whole form flat, "
+            "well lit and in frame — the form type (34A–39A) and polling station "
+            "are read from the form itself, so any filename works."
         )
-        uploaded = st.file_uploader(
-            "Choose a form file",
-            type=["pdf", "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp"],
-        )
+        tab_photo, tab_file = st.tabs(["📷 Take photo", "📁 Upload file"])
+        with tab_photo:
+            photo = camera_uploader(
+                "Take a photo of the form",
+                key="form_camera",
+                help="On a phone this opens the camera. Use the back camera and fill the frame with the form.",
+            )
+        with tab_file:
+            file = st.file_uploader(
+                "Choose a form file (PDF, PNG, JPG, JPEG, TIFF, BMP, WEBP)",
+                type=["pdf", "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp"],
+                key="form_file",
+            )
+        uploaded = photo or file
+        if photo and file:
+            st.info(f"Both a photo and a file are selected — the photo ({photo.name}) will be processed.")
         force = st.checkbox("Re-process if already in DB", value=False)
 
         if uploaded and st.button("Process", type="primary"):

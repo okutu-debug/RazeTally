@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from parser import get_vision_api_key
 from processor import process_pdf, save_upload
 from theme import apply_theme
 
@@ -13,9 +14,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+api_key, api_key_var = get_vision_api_key()
 if not api_key:
-    st.error("ANTHROPIC_API_KEY is not set — cannot parse uploaded forms.")
+    st.error(f"{api_key_var} is not set — cannot parse uploaded forms.")
     st.stop()
 
 if "batch_results" not in st.session_state:
@@ -56,8 +57,8 @@ def _run_batch(jobs: list[tuple[Path, str]], force: bool) -> list[dict]:
 
 with st.container(key="card_batch_upload"):
     st.caption(
-        "Each filename must start with the form code, e.g. `F35A-003-017-....pdf`. "
-        "Accepted formats: PDF, PNG, JPG, JPEG, TIFF, BMP, WEBP. Every file is extracted "
+        "Any filenames work — each form's type (34A–39A) is read from the form itself, "
+        "so keep the header visible. Accepted formats: PDF, PNG, JPG, JPEG, TIFF, BMP, WEBP. Every file is extracted "
         "and saved straight to the database — there's no per-file review step like the "
         "single Upload Form page, so double-check scans before uploading a large batch."
     )

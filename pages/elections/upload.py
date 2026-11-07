@@ -129,7 +129,20 @@ else:
             st.info(f"Both a photo and a file are selected — the photo ({photo.name}) will be processed.")
         force = st.checkbox("Re-process if already in DB", value=False)
 
-        if uploaded and st.button("Process", type="primary"):
+        # Always show the button (disabled until a file arrives) so agents
+        # know what comes next. A failed upload (red ⓘ on the file) happens
+        # entirely in the browser — the server never sees the file, so the
+        # best we can do is explain what that icon means.
+        process = st.button("Process", type="primary", disabled=uploaded is None)
+        if uploaded is None:
+            st.caption(
+                "The Process button turns on once your photo or file has finished uploading. "
+                "If the file shows a red ⓘ, the upload didn't reach the server — tap the ⓘ to "
+                "see why, remove the file (✕) and try again. If it keeps failing, try another "
+                "browser such as Chrome, or a stronger network connection."
+            )
+
+        if uploaded and process:
             dest = save_upload(uploaded.read(), uploaded.name)
             try:
                 with st.spinner(f"Extracting data from {uploaded.name} — this takes ~20 s…"):
